@@ -11,6 +11,7 @@
 #include "debug.h"
 #include "utils.h"
 #include "decode_opcodes.h"
+#include "elf_files.h"
 
 /*
 	don't take care about my comments, my english is bad.
@@ -21,8 +22,8 @@ bp* breakpoints = NULL;
 int add_breakpoint(
 	bp** breakpoint,
 	int id,
-	long int instruction,
-	long int address,
+	unsigned long instruction,
+	unsigned long address,
 	char* description
 )
 {
@@ -118,7 +119,7 @@ void delete_breakpoint(int id)
 	}
 }
 
-bool bp_already_exist(long int addr)
+bool bp_already_exist(unsigned long addr)
 {
 	// check if a breakpoint has already been defined.
 	bp* a = breakpoints;
@@ -324,13 +325,30 @@ bp* is_user_breakpoint(long rip)
 	return NULL;
 }
 
-void debugger_cli(pid_t child)
+void debugger_cli(char* prog_name, pid_t child)
 {
+
+	FILE* elf_file_fd = fopen(prog_name, "r");
+	if (elf_file_fd == NULL) {
+	    perror("[-] Error while reading binary");
+	    exit(1);
+	}
+
+	waitpid(child, NULL,0);
+	
+	if(!place_breakpoint(child, get_entry_point(elf_file_fd, child), "entry point"))
+	{
+		printf("[-] can't place a breakpoint on the entry point.\n");
+	}
+
+	ptrace(PTRACE_CONT, child, NULL, NULL);
+	printf("[~] child pid : %d\n", child);
+
 	while(1)
-	{			
+	{
 
 		int wait_status;
-	
+
 		pid_t signal = waitpid(child, &wait_status,0);
 
 		/*
@@ -353,7 +371,7 @@ void debugger_cli(pid_t child)
 
 		if (signal == -1)
 		{
-			printf("[~] Process ended.\n");
+			printf("\n -- Process ended. --\n\n");
 			return;
 		}
 
@@ -368,17 +386,36 @@ void debugger_cli(pid_t child)
 			if (WSTOPSIG(wait_status) == SIGSEGV)
 			{
 				printf("[-] child stopped by SIGSEGV at 0x%lx.\n", get_register(child, "rip"));
-				return;
+				exit(1);
 			}
-			if (WSTOPSIG(wait_status) != SIGTRAP)
+			if (WSTOPSIG(wait_status))
 			{
-				printf("Stopped by signal %d at 0x%lx (%s)\n",
+				printf("[~] Stopped by signal %d at 0x%lx (%s)\n",
 				WSTOPSIG(wait_status),
-				get_register(child, "rip"),
+				get_register(child, "rip") - 1,
 				strsignal(WSTOPSIG(wait_status)));
-				return;
+				bp* actual_bp = is_user_breakpoint(get_register(child, "rip")-1);
+				if (actual_bp)
+				{
+					// save registers and change rip address
+					struct user_regs_struct registers;
+					ptrace(PTRACE_GETREGS, child, NULL, &registers);
+					registers.rip = actual_bp->address;
+
+					// set regs saved with rip changed.
+					ptrace(PTRACE_SETREGS, child, NULL, &registers);						
+
+					// remove breakpoint
+					if(ptrace(PTRACE_POKETEXT, child, actual_bp->address, actual_bp->instruction_before) < 0)
+					{
+						perror("[-] Error");
+						// printf("[-] An error as occured.\n");
+						exit(1);
+					}
+
+				}
 			}
-			printf("| sigtrap at %p |\n", get_register(child, "rip")-1);
+			// printf("| sigtrap at %p |\n", get_register(child, "rip")-1);
 
 			while(1)
 			{
@@ -424,7 +461,7 @@ void debugger_cli(pid_t child)
 					{
 						print_all_bp();
 					} else {
-						long int bp_addr = strtol(str_bp_addr, NULL, 0);
+						unsigned long bp_addr = strtol(str_bp_addr, NULL, 0);
 
 						char* description = strtok(NULL, " ");
 						if (bp_already_exist(bp_addr))
@@ -463,7 +500,7 @@ void debugger_cli(pid_t child)
 
 					if (str_addr && str_size)
 					{
-						long int addr = strtol(str_addr, NULL, 0);
+						unsigned long addr = strtol(str_addr, NULL, 0);
 						int size = strtol(str_size, NULL, 0);
 						printf("[+] reading %d bytes at %p\n", size, addr);
 						uint8_t* asm_code = read_memory(child, addr, size);
@@ -480,7 +517,7 @@ void debugger_cli(pid_t child)
 					char* str_size = strtok(NULL, " ");
 					if (str_addr && str_size)
 					{
-						long int addr = strtol(str_addr, NULL, 0);
+						unsigned long addr = strtol(str_addr, NULL, 0);
 						int size = strtol(str_size, NULL, 0);
 						printf("[+] reading %d bytes at %p\n", size, addr);
 						uint8_t* data = read_memory(child, addr, size);
@@ -495,46 +532,36 @@ void debugger_cli(pid_t child)
 					}
 				}
 
+				if (strcmp(command, "map") == 0)
+				{
+					print_proc_maps(child);
+				}
 
 				if (strcmp(command, "continue") == 0) {
 					bp* actual_bp = is_user_breakpoint(get_register(child, "rip")-1);
 					if (actual_bp)
 					{
-					
-						// save registers and change rip address
+					// save registers and change rip address
 						struct user_regs_struct registers;
 						ptrace(PTRACE_GETREGS, child, NULL, &registers);
 						registers.rip = actual_bp->address;
-						//if (ptrace(PTRACE_SINGLESTEP, child, NULL, NULL) == -1)
-						//{
-						//	perror("singlestep error");
-						//}
-						// single step forward
-						// ptrace(PTRACE_SINGLESTEP, child, NULL, NULL);
-						
-						// remove breakpoint
-						if(ptrace(PTRACE_POKETEXT, child, actual_bp->address, actual_bp->instruction_before) < 0)
-						{
-							perror("[-] Error");
-							// printf("[-] An error as occured.\n");
-							exit(1);
-						}
 
 						// set regs saved with rip changed.
 						ptrace(PTRACE_SETREGS, child, NULL, &registers);						
 						
 						if (ptrace(PTRACE_SINGLESTEP, child, NULL, NULL) == -1)
 						{
-							perror("singlestep error");
+							perror("[-] singlestep error");
 						}
 						waitpid(child, &wait_status, 0);
 						
 						// set the breakpoint again.
 						if(ptrace(PTRACE_POKETEXT, child, actual_bp->address, (actual_bp->instruction_before & ~0xff) | 0xcc) < 0)
 						{
-							perror("Error bp : ");
+							perror("[-] Error bp : ");
 							exit(1);
 						}
+
 					}
 					break;
 				}
@@ -555,12 +582,12 @@ void debugger_cli(pid_t child)
 	}
 }
 
-bool place_breakpoint(pid_t child, long int address, char* description)
+bool place_breakpoint(pid_t child, unsigned long address, char* description)
 {
 	// return false if there is an error.
 
 	// we have to place the breakpoint 1 byte before the instruction we want.
-	long int instruction = ptrace(PTRACE_PEEKTEXT, child, address, NULL);
+	unsigned long instruction = ptrace(PTRACE_PEEKTEXT, child, address, NULL);
 	
 	if (instruction == -1)
 	{
@@ -596,14 +623,14 @@ void remove_breakpoint(pid_t child, int id)
 	while(a != NULL)
 	{
 		if (a->id == id) {
-			printf("before : 0x%lx\n", ptrace(PTRACE_PEEKTEXT, child, a->address, NULL));
+
 			if(ptrace(PTRACE_POKETEXT, child, a->address, a->instruction_before) < 0)
 			{
 				printf("[-] error. can't remove breakpoint %d", id);
 			}
-			printf("after : 0x%lx\n", ptrace(PTRACE_PEEKTEXT, child, a->address, NULL));
+
 			delete_breakpoint(id);
-			printf("breakpoint removed.\n");
+			printf("[+] breakpoint removed.\n");
 			return;
 		}
 		a = a->next_node;
@@ -611,13 +638,13 @@ void remove_breakpoint(pid_t child, int id)
 	printf("[-] error. breakpoint not found.\n");
 }
 
-uint8_t* read_memory(pid_t child, long int addr, int size)
+uint8_t* read_memory(pid_t child, unsigned long addr, int size)
 {
 	uint8_t* memory = malloc(size);
 
 	for (int i=0; i < size; i++)
 	{
-		long int data = ptrace(PTRACE_PEEKTEXT, child, addr+i, NULL);
+		unsigned long data = ptrace(PTRACE_PEEKTEXT, child, addr+i, NULL);
 		
 		if(data == -1) {
 			perror("[-] Error");

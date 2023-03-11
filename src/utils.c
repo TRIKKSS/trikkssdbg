@@ -37,6 +37,7 @@ void help()
 		   "reg [register name]      : print registers value.\n"
 		   "read address size        : read size bytes at address\n"
 		   "disas address size       : disassemble memory at address\n"
+		   "map                      : print /proc/pid/maps of child\n"
 		   "continue                 : continue the binary execution\n"
 		   "exit                     : exit the debugger and kill child process.\n"
 		   "help                     : print this help\n";

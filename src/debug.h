@@ -16,24 +16,30 @@ struct bp {
 };
 
 // main debugger loop
-void debugger_cli(pid_t child);
-bool place_breakpoint(pid_t child, long int address, char* description);
+void debugger_cli(char* prog_name, pid_t child);
+bool place_breakpoint(pid_t child, unsigned long address, char* description);
 void remove_breakpoint(pid_t child, int id);
 void print_all_registers(pid_t process);
 long get_register(pid_t process, char* reg_name);
 int is_reg_available(char *regs_name);
-bool bp_already_exist(long int addr);
+bool bp_already_exist(unsigned long addr);
 void print_all_bp();
 void delete_breakpoint(int id);
 int add_breakpoint(
 	bp** breakpoint,
 	int id,
-	long int instruction,
-	long int address,
+	unsigned long instruction,
+	unsigned long address,
 	char* description
 );
 bp* is_user_breakpoint(long rip);
-uint8_t* read_memory(pid_t child, long int addr, int size);
+uint8_t* read_memory(pid_t child, unsigned long addr, int size);
+
 // void check_for_malloc_errors(void* ptr);
+
+/*
+when a breakpoint is reached we replace the bp instr by the previous instruction
+when the continue command is entered we replace the breakpoint.
+*/
 
 #endif
