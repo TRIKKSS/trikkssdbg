@@ -20,7 +20,7 @@ make
 
 ## Usage
 
-`./trikkssdbg binary_to_debug`
+```./trikkssdbg binary_to_debug```
 
 ## Help
 
