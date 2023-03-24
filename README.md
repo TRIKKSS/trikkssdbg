@@ -38,6 +38,8 @@ exit                     : exit the debugger and kill child process.
 help                     : print this help
 ```
 
-
+## Todo
+- add cli arguments
+- better parsing of command (bp description)
 
 
